@@ -17,20 +17,30 @@ __global__ void splitArrayIntoThreads(int* input, int* output, int N) {
 }
 
 int main(int argc, char **argv) {
+    if (argc < 2) {
+        printf("Usage: %s <log2(size)>\n", argv[0]);
+        return -1;
+    }
 
-    int p, q;
-    q = atoi(argv[1]);
-    p = atoi(argv[2]);
-    const int N = 1 << (p + q);
-    int h_input[N];
-    generate_random_array(h_input, N); //Example input array
+    int q = atoi(argv[1]);
+    const int N = 1 << q;
+
+    // Allocate memory for input and output arrays on the host (heap allocation)
+    int *h_input = (int*)malloc(N * sizeof(int));
+    int *h_output = (int*)malloc(N * sizeof(int));
+
+    if (h_input == NULL || h_output == NULL) {
+        printf("Failed to allocate host memory\n");
+        return -1;
+    }
+
+    generate_random_array(h_input, N);
 
     // Print input array
-    for(int i = 0; i < N; i++) {
+    for (int i = 0; i < N; i++) {
         printf("%d ", h_input[i]);
-    }   
-    // Allocate memory for output arrays
-    int h_output[N];
+    }
+    printf("\n");
 
     int *d_input, *d_output;
 
@@ -56,11 +66,13 @@ int main(int argc, char **argv) {
     }
 
     // Free device memory
-    cudaFree(h_input);
-    cudaFree(h_output);
     cudaFree(d_input);
     cudaFree(d_output);
+
+    // Free host memory
+    free(h_input);
+    free(h_output);
+
     return 0;
 }
-
 //nvcc -o program program.cu
