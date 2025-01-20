@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 #include "array_gen.h"
+#include "sortnmerge.h"
 
 __global__ void hello_from_gpu() {
     printf("Hello from GPU!\n");
@@ -11,13 +12,16 @@ __global__ void splitArrayIntoThreads(int* input, int* output, int N) {
 
     if (idx < N / 2) {
         output[2 * idx] = input[2 * idx];       // First integer for the thread
-        output[2 * idx + 1] = input[2 * idx + 1];;   // Second integer for the thread
+        output[2 * idx + 1] = input[2 * idx + 1];   // Second integer for the thread
     }
 }
 
-int main() {
+int main(int argc, char **argv) {
 
-    const int N = 10;
+    int p, q;
+    q = atoi(argv[1]);
+    p = atoi(argv[2]);
+    const int N = 1 << (p + q);
     int h_input[N];
     generate_random_array(h_input, N); //Example input array
 
@@ -38,7 +42,7 @@ int main() {
     cudaMemcpy(d_input, h_input, N * sizeof(int), cudaMemcpyHostToDevice);
 
     // Launch the kernel
-    int threadsPerBlock = 256;
+    int threadsPerBlock = 1024;
     int blocksPerGrid = (N / 2 + threadsPerBlock - 1) / threadsPerBlock;
     splitArrayIntoThreads<<<blocksPerGrid, threadsPerBlock>>>(d_input, d_output, N);
 
@@ -52,6 +56,8 @@ int main() {
     }
 
     // Free device memory
+    cudaFree(h_input);
+    cudaFree(h_output);
     cudaFree(d_input);
     cudaFree(d_output);
     return 0;
