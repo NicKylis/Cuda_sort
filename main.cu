@@ -5,6 +5,15 @@
 #include <cuda_runtime.h>
 #include "array_gen.h"
 
+__global__ void splitArrayIntoThreads(int* input, int* output, int N) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if (idx < N / 2) {
+        output[2 * idx] = input[2 * idx];       // First integer for the thread
+        output[2 * idx + 1] = input[2 * idx + 1];   // Second integer for the thread
+    }
+}
+
 // CUDA kernel for performing bitonic merge
 __global__ void bitonic_merge(int *d_array, int low, int cnt, int dir) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
@@ -43,7 +52,6 @@ __global__ void bitonic_sort(int *d_array, int low, int cnt, int dir) {
     }
 }
 
-// Split function that works exactly as you mentioned
 void split(int *arr, int low, int cnt, int dir) {
     for (int size = 2; size <= cnt; size = size * 2) {
         for (int i = low; i < low + cnt - size; i++) {
@@ -59,33 +67,50 @@ void split(int *arr, int low, int cnt, int dir) {
 
 // Host function to perform bitonic sort with CUDA
 void bitonicSortCUDA(int *h_array, int N) {
-    // Allocate memory on the device
+
+    // Allocate memory on the GPU
     int *d_array;
     cudaMalloc(&d_array, N * sizeof(int));
 
-    // Copy array data to the device
-    cudaMemcpy(d_array, h_array, N * sizeof(int), cudaMemcpyHostToDevice);
+    int threadsPerBlock = 1024;
+    int blocksPerGrid = (N / 2 + threadsPerBlock - 1) / threadsPerBlock;
+    splitArrayIntoThreads<<<blocksPerGrid, threadsPerBlock>>>(h_array, d_array, N);
 
-    int numThreads = N / 2;  // Each thread handles two elements
-    int numBlocks = (N + numThreads - 1) / numThreads;  // Number of blocks to launch
+    int step_count = log2(N + 1);
+    int partner;
 
-    // Perform the bitonic sort iteratively
-    int step_count = log2(N);  // Number of steps for bitonic sort
-
-    // First phase: Each thread processes pairs of elements using the split function
     for (int step = 1; step <= step_count; step++) {
-        split(h_array, 0, N, 1);  // Ascending order split
-        cudaMemcpy(d_array, h_array, N * sizeof(int), cudaMemcpyHostToDevice);
+        int dist = 1 << (step - 1);
         
+        if (threadIdx.x % (2 * dist) < dist) {
+            partner = threadIdx.x + dist;
+        } else {
+            partner = threadIdx.x - dist;
+        }
+        if (partner >= 0 && partner < threadsPerBlock){
+            if ((threadIdx.x / dist) % 2 == 0) {
+                if (d_array[threadIdx.x] > d_array[partner]) {
+                    int temp = d_array[threadIdx.x];
+                    d_array[threadIdx.x] = d_array[partner];
+                    d_array[partner] = temp;
+                }
+            } else {
+                if (d_array[threadIdx.x] < d_array[partner]) {
+                    int temp = d_array[threadIdx.x];
+                    d_array[threadIdx.x] = d_array[partner];
+                    d_array[partner] = temp;
+                }
+            }
+        }
         // Perform bitonic merge for this step
-        bitonic_merge<<<numBlocks, numThreads>>>(d_array, 0, N, 1);  // Ascending order
+        bitonic_merge<<<blocksPerGrid, threadsPerBlock>>>(d_array, 0, N, 1);  // Ascending order
         cudaDeviceSynchronize();  // Ensure all threads finish before moving on
     }
 
     // Final pass: Perform bitonic merge iteratively for the entire array size
     int currentSize = 2;
     while (currentSize <= N) {
-        bitonic_merge<<<numBlocks, numThreads>>>(d_array, 0, currentSize, 1);  // Ascending order merge
+        bitonic_merge<<<blocksPerGrid, threadsPerBlock>>>(d_array, 0, currentSize, 1);  // Ascending order merge
         currentSize *= 2;  // Double the size of the merged section
         cudaDeviceSynchronize(); // Ensure proper synchronization
     }
