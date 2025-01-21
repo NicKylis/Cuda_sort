@@ -65,62 +65,81 @@ void split(int *arr, int low, int cnt, int dir) {
     }
 }
 
-// Host function to perform bitonic sort with CUDA
-void bitonicSortCUDA(int *h_array, int N) {
+#include <cuda.h>
+#include <cmath>
+#include <cstdio>
 
-    // Allocate memory on the GPU
-    int *d_array;
-    cudaMalloc(&d_array, N * sizeof(int));
+__global__ void bitonic_sort_step(int* d_array, int N, int step, int dist) {
+    extern __shared__ int shared_array[];
 
-    int threadsPerBlock = 1024;
-    int blocksPerGrid = (N / 2 + threadsPerBlock - 1) / threadsPerBlock;
-    splitArrayIntoThreads<<<blocksPerGrid, threadsPerBlock>>>(h_array, d_array, N);
+    int thread_idx = threadIdx.x;
+    int global_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    int step_count = log2(N + 1);
+    // Load data into shared memory
+    if (global_idx < N) {
+        shared_array[thread_idx] = d_array[global_idx];
+    }
+    __syncthreads();
+
     int partner;
-
-    for (int step = 1; step <= step_count; step++) {
-        int dist = 1 << (step - 1);
-        
-        if (threadIdx.x % (2 * dist) < dist) {
-            partner = threadIdx.x + dist;
-        } else {
-            partner = threadIdx.x - dist;
-        }
-        if (partner >= 0 && partner < threadsPerBlock){
-            if ((threadIdx.x / dist) % 2 == 0) {
-                if (d_array[threadIdx.x] > d_array[partner]) {
-                    int temp = d_array[threadIdx.x];
-                    d_array[threadIdx.x] = d_array[partner];
-                    d_array[partner] = temp;
-                }
-            } else {
-                if (d_array[threadIdx.x] < d_array[partner]) {
-                    int temp = d_array[threadIdx.x];
-                    d_array[threadIdx.x] = d_array[partner];
-                    d_array[partner] = temp;
-                }
-            }
-        }
-        // Perform bitonic merge for this step
-        bitonic_merge<<<blocksPerGrid, threadsPerBlock>>>(d_array, 0, N, 1);  // Ascending order
-        cudaDeviceSynchronize();  // Ensure all threads finish before moving on
+    if (thread_idx % (2 * dist) < dist) {
+        partner = thread_idx + dist;
+    } else {
+        partner = thread_idx - dist;
     }
 
-    // Final pass: Perform bitonic merge iteratively for the entire array size
-    int currentSize = 2;
-    while (currentSize <= N) {
-        bitonic_merge<<<blocksPerGrid, threadsPerBlock>>>(d_array, 0, currentSize, 1);  // Ascending order merge
-        currentSize *= 2;  // Double the size of the merged section
-        cudaDeviceSynchronize(); // Ensure proper synchronization
+    // Ensure partner is within bounds of shared memory
+    if (partner >= 0 && partner < blockDim.x && global_idx < N) {
+        if ((thread_idx / dist) % 2 == 0) {
+            if (shared_array[thread_idx] > shared_array[partner]) {
+                // Swap values in shared memory
+                int temp = shared_array[thread_idx];
+                shared_array[thread_idx] = shared_array[partner];
+                shared_array[partner] = temp;
+            }
+        } else {
+            if (shared_array[thread_idx] < shared_array[partner]) {
+                // Swap values in shared memory
+                int temp = shared_array[thread_idx];
+                shared_array[thread_idx] = shared_array[partner];
+                shared_array[partner] = temp;
+            }
+        }
+    }
+    __syncthreads();
+
+    // Write shared memory back to global memory
+    if (global_idx < N) {
+        d_array[global_idx] = shared_array[thread_idx];
+    }
+}
+
+void bitonicSortCUDA(int* h_array, int N) {
+    // Allocate memory on the GPU
+    int* d_array;
+    cudaMalloc(&d_array, N * sizeof(int));
+    cudaMemcpy(d_array, h_array, N * sizeof(int), cudaMemcpyHostToDevice);
+
+    int threadsPerBlock = 1024;
+    int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+
+    int step_count = log2(N);
+    for (int step = 1; step <= step_count; step++) {
+        int dist = 1 << (step - 1);
+
+        // Launch kernel for each step
+        size_t sharedMemSize = threadsPerBlock * sizeof(int); // Shared memory size
+        bitonic_sort_step<<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(d_array, N, step, dist);
+        cudaDeviceSynchronize(); // Ensure all steps complete before moving to the next
     }
 
     // Copy the sorted array back to the host
     cudaMemcpy(h_array, d_array, N * sizeof(int), cudaMemcpyDeviceToHost);
 
-    // Free the device memory
+    // Free device memory
     cudaFree(d_array);
 }
+
 
 int main(int argc, char **argv) {
     if (argc < 2) {
