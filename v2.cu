@@ -157,6 +157,11 @@ void multiBlockSortGlobalCUDA(int N, int *array) {
     int numBlocks = (N + blockSize - 1) / blockSize;
 
     // Step 1: Sort each block locally
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
     sortLocalCUDA<<<numBlocks, blockSize, blockSize * sizeof(int)>>>(N, d_array);
     cudaDeviceSynchronize();
 
@@ -168,7 +173,11 @@ void multiBlockSortGlobalCUDA(int N, int *array) {
         cudaDeviceSynchronize();
         subarray_size *= 2;
     }
-
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    float milliseconds;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    printf("Time: %f ms\n", milliseconds);
     // Copy result back to host
     cudaMemcpy(array, d_array, N * sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(d_array);
@@ -188,15 +197,25 @@ int main(int argc, char **argv) {
     int *h_array = (int *)malloc(N * sizeof(int));
     generate_random_array(h_array, N);
 
-    // Perform the multi-block sort using CUDA
-    multiBlockSortGlobalCUDA(N, h_array);
+    // cudaEvent_t start, stop;
+    // cudaEventCreate(&start);
+    // cudaEventCreate(&stop);
 
+    // cudaEventRecord(start);
+    multiBlockSortGlobalCUDA(N, h_array);
+    // cudaEventRecord(stop);
+    // cudaEventSynchronize(stop);
+
+    // float milliseconds;
+    // cudaEventElapsedTime(&milliseconds, start, stop);
+    
     // Print the sorted array
     // printf("Sorted Array: ");
     // for (int i = 0; i < N; i++) {
     //     printf("%d ", h_array[i]);
     // }
     // printf("\n");
+    // printf("Time: %f ms\n", milliseconds);
 
     free(h_array);
     return 0;
