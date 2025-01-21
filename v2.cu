@@ -37,72 +37,90 @@ __global__ void sortLocalCUDA(int N, int *array) {
     }
 }
 
-__global__ void mergeCUDA(int N, int *array, int subarray_size) {
+__global__ void sortLocal2CUDA(int rank, int num_q, int *array) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
-    // Calculate start, mid, and end indices for this merge
-    int start = (idx / subarray_size) * subarray_size * 2;
-    int mid = start + subarray_size;
-    int end = min(start + 2 * subarray_size, N);
-
-    if (start >= N || mid >= N) return;
-
-    // Temporary storage for merging
-    extern __shared__ int temp[];
-
-    int left = start;
-    int right = mid;
-    int out_idx = start;
-
-    // Merge two sorted subarrays
-    while (left < mid && right < end) {
-        if (array[left] <= array[right]) {
-            temp[out_idx - start] = array[left++];
+    if (idx < num_q) {
+        if (rank % 2 == 0) {
+            // Ascending (Even thread ranks)
+            for (int i = 0; i < num_q - 1; i++) {
+                for (int j = i + 1; j < num_q; j++) {
+                    if (array[i] > array[j]) {
+                        int temp = array[i];
+                        array[i] = array[j];
+                        array[j] = temp;
+                    }
+                }
+            }
         } else {
-            temp[out_idx - start] = array[right++];
+            // Descending (Odd thread ranks)
+            for (int i = 0; i < num_q - 1; i++) {
+                for (int j = i + 1; j < num_q; j++) {
+                    if (array[i] < array[j]) {
+                        int temp = array[i];
+                        array[i] = array[j];
+                        array[j] = temp;
+                    }
+                }
+            }
         }
-        out_idx++;
-    }
-
-    // Copy remaining elements
-    while (left < mid) {
-        temp[out_idx - start] = array[left++];
-        out_idx++;
-    }
-    while (right < end) {
-        temp[out_idx - start] = array[right++];
-        out_idx++;
-    }
-
-    // Write back merged subarray to global memory
-    for (int i = start; i < end; i++) {
-        array[i] = temp[i - start];
     }
 }
 
-void multiBlockSortCUDA(int N, int *array) {
+// CUDA kernel for minmax operation between threads
+__global__ void minmaxCUDA(int rank, int partner_rank, int num_q, int *array,
+                            bool sort_descending) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    __shared__ int shared_array[1024];  // 1024 threads per block
+
+    if (idx < num_q) {
+        shared_array[idx] = array[idx];
+    }
+    __syncthreads();
+
+    if ((!sort_descending && rank < partner_rank) || (sort_descending && rank > partner_rank)) {
+        // Keep min / max depending on the thread rank
+        for (int i = 0; i < num_q; i++) {
+            if (array[i] > shared_array[i]) {
+                array[i] = shared_array[i];
+            }
+        }
+    } else {
+        for (int i = 0; i < num_q; i++) {
+            if (array[i] < shared_array[i]) {
+                array[i] = shared_array[i];
+            }
+        }
+    }
+}
+
+// Main bitonic sort kernel
+ void bitonicSortCUDA(int rank, int num_p, int num_q, int *array) {
+    // Sorting the processes (threads in blocks)
     int *d_array;
-    cudaMalloc((void **)&d_array, N * sizeof(int));
-    cudaMemcpy(d_array, array, N * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc((void **)&d_array, num_q * sizeof(int));
+    cudaMemcpy(d_array, array, num_q * sizeof(int), cudaMemcpyHostToDevice);
 
     int blockSize = 1024;  // Number of threads per block
-    int numBlocks = (N + blockSize - 1) / blockSize;
+    int numBlocks = (num_q + blockSize - 1) / blockSize;
 
-    // Step 1: Sort each block locally
-    sortLocalCUDA<<<numBlocks, blockSize, blockSize * sizeof(int)>>>(N, d_array);
+    // Sorting within threads
+    sortLocal2CUDA<<<numBlocks, blockSize>>>(rank, num_q, d_array);
     cudaDeviceSynchronize();
 
-    // Step 2: Iteratively merge sorted blocks
-    int subarray_size = blockSize;
-    while (subarray_size < N) {
-        int num_merge_blocks = (N + 2 * subarray_size - 1) / (2 * subarray_size);
-        mergeCUDA<<<num_merge_blocks, blockSize, 2 * subarray_size * sizeof(int)>>>(N, d_array, subarray_size);
-        cudaDeviceSynchronize();
-        subarray_size *= 2;  // Double the size of subarrays in the next step
+    for (int group_size = 2; group_size <= num_p; group_size *= 2) {
+        bool sort_descending = rank & group_size;
+        for (int distance = group_size / 2; distance > 0; distance /= 2) {
+            int partner_rank = rank ^ distance;
+
+            // Perform minmax operation between partner threads
+            minmaxCUDA<<<numBlocks, blockSize>>>(rank, partner_rank, num_q, d_array, sort_descending);
+            cudaDeviceSynchronize();
+        }
     }
 
-    // Copy result back to host
-    cudaMemcpy(array, d_array, N * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(array, d_array, num_q * sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(d_array);
 }
 
@@ -183,7 +201,6 @@ void multiBlockSortGlobalCUDA(int N, int *array) {
     cudaFree(d_array);
 }
 
-
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Usage: %s <log2(size)>\n", argv[0]);
@@ -197,23 +214,13 @@ int main(int argc, char **argv) {
     int *h_array = (int *)malloc(N * sizeof(int));
     generate_random_array(h_array, N);
 
-    // cudaEvent_t start, stop;
-    // cudaEventCreate(&start);
-    // cudaEventCreate(&stop);
-
-    // cudaEventRecord(start);
     multiBlockSortGlobalCUDA(N, h_array);
-    // cudaEventRecord(stop);
-    // cudaEventSynchronize(stop);
-
-    // float milliseconds;
-    // cudaEventElapsedTime(&milliseconds, start, stop);
     
-    // Print the sorted array
-    // printf("Sorted Array: ");
-    // for (int i = 0; i < N; i++) {
-    //     printf("%d ", h_array[i]);
-    // }
+    // Uncomment this to print the sorted array
+    printf("Sorted Array: ");
+    for (int i = 0; i < N; i++) {
+        printf("%d ", h_array[i]);
+    }
     // printf("\n");
     // printf("Time: %f ms\n", milliseconds);
 
