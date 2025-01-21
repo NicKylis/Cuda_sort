@@ -69,77 +69,96 @@ void split(int *arr, int low, int cnt, int dir) {
 #include <cmath>
 #include <cstdio>
 
-__global__ void bitonic_sort_step(int* d_array, int N, int step, int dist) {
-    extern __shared__ int shared_array[];
+// CUDA kernel for sorting processes within a block
+__global__ void sortProcessesCUDA(int rank, int num_q, int *array) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
-    int thread_idx = threadIdx.x;
-    int global_idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-    // Load data into shared memory
-    if (global_idx < N) {
-        shared_array[thread_idx] = d_array[global_idx];
-    }
-    __syncthreads();
-
-    int partner;
-    if (thread_idx % (2 * dist) < dist) {
-        partner = thread_idx + dist;
-    } else {
-        partner = thread_idx - dist;
-    }
-
-    // Ensure partner is within bounds of shared memory
-    if (partner >= 0 && partner < blockDim.x && global_idx < N) {
-        if ((thread_idx / dist) % 2 == 0) {
-            if (shared_array[thread_idx] > shared_array[partner]) {
-                // Swap values in shared memory
-                int temp = shared_array[thread_idx];
-                shared_array[thread_idx] = shared_array[partner];
-                shared_array[partner] = temp;
+    if (idx < num_q) {
+        if (rank % 2 == 0) {
+            // Ascending sort (Even processes)
+            for (int i = 0; i < num_q - 1; i++) {
+                for (int j = i + 1; j < num_q; j++) {
+                    if (array[i] > array[j]) {
+                        int temp = array[i];
+                        array[i] = array[j];
+                        array[j] = temp;
+                    }
+                }
             }
         } else {
-            if (shared_array[thread_idx] < shared_array[partner]) {
-                // Swap values in shared memory
-                int temp = shared_array[thread_idx];
-                shared_array[thread_idx] = shared_array[partner];
-                shared_array[partner] = temp;
+            // Descending sort (Odd processes)
+            for (int i = 0; i < num_q - 1; i++) {
+                for (int j = i + 1; j < num_q; j++) {
+                    if (array[i] < array[j]) {
+                        int temp = array[i];
+                        array[i] = array[j];
+                        array[j] = temp;
+                    }
+                }
             }
         }
     }
+}
+
+// CUDA kernel for minmax operation between threads
+__global__ void minmaxCUDA(int rank, int partner_rank, int num_q, int *array,
+                            bool sort_descending) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    __shared__ int shared_array[256];  // Assume 256 threads per block
+
+    if (idx < num_q) {
+        shared_array[idx] = array[idx];
+    }
     __syncthreads();
 
-    // Write shared memory back to global memory
-    if (global_idx < N) {
-        d_array[global_idx] = shared_array[thread_idx];
+    if ((!sort_descending && rank < partner_rank) || (sort_descending && rank > partner_rank)) {
+        // Keep min elements
+        for (int i = 0; i < num_q; i++) {
+            if (array[i] > shared_array[i]) {
+                array[i] = shared_array[i];
+            }
+        }
+    } else {
+        // Keep max elements
+        for (int i = 0; i < num_q; i++) {
+            if (array[i] < shared_array[i]) {
+                array[i] = shared_array[i];
+            }
+        }
     }
 }
 
-void bitonicSortCUDA(int* h_array, int N) {
-    // Allocate memory on the GPU
-    int* d_array;
-    cudaMalloc(&d_array, N * sizeof(int));
-    cudaMemcpy(d_array, h_array, N * sizeof(int), cudaMemcpyHostToDevice);
+// Main bitonic sort kernel
+void bitonicSortCUDA(int rank, int num_p, int num_q, int *array) {
+    // Sorting the processes (threads in blocks)
+    int *d_array;
+    cudaMalloc((void **)&d_array, num_q * sizeof(int));
+    cudaMemcpy(d_array, array, num_q * sizeof(int), cudaMemcpyHostToDevice);
 
-    int threadsPerBlock = 1024;
-    int blocksPerGrid = (N + threadsPerBlock - 1) / threadsPerBlock;
+    int blockSize = 256;  // Number of threads per block
+    int numBlocks = (num_q + blockSize - 1) / blockSize;
 
-    int step_count = log2(N);
-    for (int step = 1; step <= step_count; step++) {
-        int dist = 1 << (step - 1);
+    // Sorting within processes (threads)
+    sortProcessesCUDA<<<numBlocks, blockSize>>>(rank, num_q, d_array);
+    cudaDeviceSynchronize();
 
-        // Launch kernel for each step
-        size_t sharedMemSize = threadsPerBlock * sizeof(int); // Shared memory size
-        bitonic_sort_step<<<blocksPerGrid, threadsPerBlock, sharedMemSize>>>(d_array, N, step, dist);
-        cudaDeviceSynchronize(); // Ensure all steps complete before moving to the next
+    for (int group_size = 2; group_size <= num_p; group_size *= 2) {
+        bool sort_descending = rank & group_size;
+        for (int distance = group_size / 2; distance > 0; distance /= 2) {
+            int partner_rank = rank ^ distance;
+
+            // Perform minmax operation between partner threads
+            minmaxCUDA<<<numBlocks, blockSize>>>(rank, partner_rank, num_q, d_array, sort_descending);
+            cudaDeviceSynchronize();
+        }
+        // Assuming elbowMerge function will also be parallelized in a similar manner
+        // elbowMerge(num_p, num_q, array, sort_descending);
     }
 
-    // Copy the sorted array back to the host
-    cudaMemcpy(h_array, d_array, N * sizeof(int), cudaMemcpyDeviceToHost);
-
-    // Free device memory
+    cudaMemcpy(array, d_array, num_q * sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(d_array);
 }
-
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -155,7 +174,7 @@ int main(int argc, char **argv) {
     generate_random_array(h_array, N);
 
     // Perform the bitonic sort using CUDA
-    bitonicSortCUDA(h_array, N);
+    bitonicSortCUDA(0, N / 2, N, h_array);
 
     // Print the sorted array
     printf("Sorted Array: ");
