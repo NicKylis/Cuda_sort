@@ -3,10 +3,18 @@
 #include <math.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "array_gen.h"
 #include "v0.h"
 #include "v1.h"
 #include "v2.h"
+
+#define MAX_NUM 1000 //Change this to the desired max value
+
+void generate_random_array(int *arr, int size) {
+    srand(time(NULL));
+    for (int i = 0; i < size; i++) {
+        arr[i] = rand() % MAX_NUM;
+    }
+}
 
 int main(int argc, char **argv) {
     if (argc < 2) {
@@ -22,16 +30,15 @@ int main(int argc, char **argv) {
     generate_random_array(h_array, N);
 
     // Perform the bitonic sort using CUDA
-    v0_sort(0, N / 2, N, h_array);
+    v2_sort(N, h_array);
 
-    // Print the sorted array
-    printf("Sorted Array: ");
-    for (int i = 0; i < N; i++) {
-        printf("%d ", h_array[i]);
-    }
+    // Uncomment this to print the sorted array
+    // printf("Sorted Array: ");
+    // for (int i = 0; i < N; i++) {
+    //     printf("%d ", h_array[i]);
+    // }
     printf("\n");
 
-    // Free the allocated memory
     free(h_array);
 
     return 0;
