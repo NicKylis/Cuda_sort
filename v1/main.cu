@@ -3,9 +3,7 @@
 #include <math.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include "v0.h"
 #include "v1.h"
-#include "v2.h"
 
 #define MAX_NUM 1000 //Change this to the desired max value
 
