@@ -2,3 +2,5 @@ test
 .vscode/settings.json
 array_gen
 experiment3.cu
+stack.cu
+.vscode/c_cpp_properties.json

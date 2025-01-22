@@ -48,40 +48,46 @@ __global__ void bitonicSortLocalCUDA(int N, int *array) {
     }
 }
 
-// CPU function to merge two sorted arrays
-void mergeCPU(int *array, int start, int mid, int end) {
-    int *temp = new int[end - start];
-    int left = start, right = mid, idx = 0;
+__global__ void mergeGlobalCUDA(int *array, int N, int subarray_size) {
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
+    // Each thread merges two subarrays of size `subarray_size`
+    int start = (tid * 2 * subarray_size);
+    int mid = start + subarray_size;
+    int end = min(start + 2 * subarray_size, N);
+
+    if (start >= N || mid >= N) return; // Bounds check
+
+    // Temporary buffer for merging
+    int *temp = new int[end - start];
+
+    int left = start;
+    int right = mid;
+    int out_idx = 0;
+
+    // Merge two sorted subarrays into `temp`
     while (left < mid && right < end) {
         if (array[left] <= array[right]) {
-            temp[idx++] = array[left++];
+            temp[out_idx++] = array[left++];
         } else {
-            temp[idx++] = array[right++];
+            temp[out_idx++] = array[right++];
         }
     }
 
-    while (left < mid) temp[idx++] = array[left++];
-    while (right < end) temp[idx++] = array[right++];
+    // Copy remaining elements
+    while (left < mid) {
+        temp[out_idx++] = array[left++];
+    }
+    while (right < end) {
+        temp[out_idx++] = array[right++];
+    }
 
-    for (int i = 0; i < idx; i++) {
+    // Write back the sorted subarray to the original array
+    for (int i = 0; i < (end - start); i++) {
         array[start + i] = temp[i];
     }
-    delete[] temp;
-}
 
-// CPU function for multiway merge
-void multiwayMergeCPU(int N, int *array, int chunk_size) {
-    while (chunk_size < N) {
-        for (int start = 0; start < N; start += 2 * chunk_size) {
-            int mid = start + chunk_size;
-            int end = min(start + 2 * chunk_size, N);
-            if (mid < end) {
-                mergeCPU(array, start, mid, end);
-            }
-        }
-        chunk_size *= 2;
-    }
+    delete[] temp; // Free temporary buffer
 }
 
 void multiBlockSortGlobalCUDA(int N, int *array) {
@@ -101,45 +107,21 @@ void multiBlockSortGlobalCUDA(int N, int *array) {
     bitonicSortLocalCUDA<<<numBlocks, blockSize, blockSize * sizeof(int)>>>(N, d_array);
     cudaDeviceSynchronize();
 
-    // Copy the partially sorted array back to the host
-    cudaMemcpy(array, d_array, N * sizeof(int), cudaMemcpyDeviceToHost);
-    cudaFree(d_array);
-    
-
-    // Step 2: Perform the final merging on the CPU
-    int chunk_size = blockSize;
-    multiwayMergeCPU(N, array, chunk_size);
-
+    // Step 2: Iteratively merge sorted blocks
+    int subarray_size = blockSize;
+    while (subarray_size < N) {
+        int num_merge_blocks = (N + 2 * subarray_size - 1) / (2 * subarray_size);
+        mergeGlobalCUDA<<<num_merge_blocks, blockSize>>>(d_array, N, subarray_size);
+        cudaDeviceSynchronize();
+        subarray_size *= 2;
+    }
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
-
     float milliseconds;
     cudaEventElapsedTime(&milliseconds, start, stop);
     printf("Time: %f ms\n", milliseconds);
-}
 
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        printf("Usage: %s <log2(size)>\n", argv[0]);
-        return -1;
-    }
-
-    int q = atoi(argv[1]);
-    const int N = 1 << q;
-
-    // Generate a random array
-    int *h_array = (int *)malloc(N * sizeof(int));
-    generate_random_array(h_array, N);
-
-    multiBlockSortGlobalCUDA(N, h_array);
-
-    // Uncomment this to print the sorted array
-    // printf("Sorted Array: ");
-    // for (int i = 0; i < N; i++) {
-    //     printf("%d ", h_array[i]);
-    // }
-    printf("\n");
-
-    free(h_array);
-    return 0;
+    // Copy result back to host
+    cudaMemcpy(array, d_array, N * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaFree(d_array);
 }
