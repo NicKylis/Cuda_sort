@@ -104,6 +104,7 @@ void multiBlockSortGlobalCUDA(int N, int *array) {
     // Copy the partially sorted array back to the host
     cudaMemcpy(array, d_array, N * sizeof(int), cudaMemcpyDeviceToHost);
     cudaFree(d_array);
+    
 
     // Step 2: Perform the final merging on the CPU
     int chunk_size = blockSize;
@@ -111,6 +112,7 @@ void multiBlockSortGlobalCUDA(int N, int *array) {
 
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
+
     float milliseconds;
     cudaEventElapsedTime(&milliseconds, start, stop);
     printf("Time: %f ms\n", milliseconds);
