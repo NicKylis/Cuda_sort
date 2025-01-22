@@ -142,10 +142,10 @@ int main(int argc, char **argv) {
     multiBlockSortGlobalCUDA(N, h_array);
 
     // Uncomment this to print the sorted array
-    printf("Sorted Array: ");
-    for (int i = 0; i < N; i++) {
-        printf("%d ", h_array[i]);
-    }
+    // printf("Sorted Array: ");
+    // for (int i = 0; i < N; i++) {
+    //     printf("%d ", h_array[i]);
+    // }
     printf("\n");
 
     free(h_array);
