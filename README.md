@@ -9,7 +9,7 @@ This repository contains an implementation of the Bitonic sorting algorithm usin
 ### Prerequisites
 - CUDA Toolkit installed on your system
 - A compatible NVIDIA GPU
-- CMake (for building the project)
+- UNIX based system (or WSL for windows 10 and 11)
 
 ### Building the Project
 1. Clone the repository:
