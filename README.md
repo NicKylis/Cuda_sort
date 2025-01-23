@@ -32,6 +32,7 @@ This repository contains an implementation of the Bitonic sorting algorithm usin
     ```
     q: Defines the size of the array (2 ^ q)
 2. The program will sort a predefined array using the Bitonic sorting algorithm on the GPU.
+   If you wish to see the output array on your screen, uncomment lines 33-37 in main.cu file.
 
 ### Customizing the Input
 - To sort a custom array, you can modify the input array in the `main.cu` file.
