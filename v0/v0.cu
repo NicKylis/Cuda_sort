@@ -10,7 +10,6 @@ __global__ void sortLocalCUDA(int N, int *array) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     int thread_id = threadIdx.x;
 
-    // Load data into shared memory
     if (idx < N) {
         shared_array[thread_id] = array[idx];
     } else {
@@ -18,7 +17,6 @@ __global__ void sortLocalCUDA(int N, int *array) {
     }
     __syncthreads();
 
-    // Perform local sorting in shared memory
     for (int i = 0; i < blockDim.x - 1; i++) {
         for (int j = i + 1; j < blockDim.x; j++) {
             if (shared_array[i] > shared_array[j]) {
@@ -67,7 +65,7 @@ __global__ void sortLocal2CUDA(int rank, int num_q, int *array) {
 }
 
 // CUDA kernel for minmax operation between threads
-__global__ void minmaxCUDA(int rank, int partner_rank, int num_q, int *array,
+__global__ void mergeCUDA(int rank, int partner_rank, int num_q, int *array,
                             bool sort_descending) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -96,7 +94,7 @@ __global__ void minmaxCUDA(int rank, int partner_rank, int num_q, int *array,
 
 // Main bitonic sort kernel
  void bitonicSortCUDA(int rank, int num_p, int num_q, int *array) {
-    // Sorting the processes (threads in blocks)
+
     int *d_array;
     cudaMalloc((void **)&d_array, num_q * sizeof(int));
     cudaMemcpy(d_array, array, num_q * sizeof(int), cudaMemcpyHostToDevice);
@@ -114,7 +112,7 @@ __global__ void minmaxCUDA(int rank, int partner_rank, int num_q, int *array,
             int partner_rank = rank ^ distance;
 
             // Perform minmax operation between partner threads
-            minmaxCUDA<<<numBlocks, blockSize>>>(rank, partner_rank, num_q, d_array, sort_descending);
+            mergeCUDA<<<numBlocks, blockSize>>>(rank, partner_rank, num_q, d_array, sort_descending);
             cudaDeviceSynchronize();
         }
     }
@@ -140,7 +138,6 @@ __global__ void mergeGlobalCUDA(int *array, int N, int subarray_size) {
     int right = mid;
     int out_idx = 0;
 
-    // Merge two sorted subarrays into `temp`
     while (left < mid && right < end) {
         if (array[left] <= array[right]) {
             temp[out_idx++] = array[left++];
@@ -149,7 +146,6 @@ __global__ void mergeGlobalCUDA(int *array, int N, int subarray_size) {
         }
     }
 
-    // Copy remaining elements
     while (left < mid) {
         temp[out_idx++] = array[left++];
     }
@@ -162,7 +158,7 @@ __global__ void mergeGlobalCUDA(int *array, int N, int subarray_size) {
         array[start + i] = temp[i];
     }
 
-    delete[] temp; // Free temporary buffer
+    delete[] temp;
 }
 
 void v0_sort(int N, int *array) {
@@ -182,7 +178,7 @@ void v0_sort(int N, int *array) {
     sortLocalCUDA<<<numBlocks, blockSize, blockSize * sizeof(int)>>>(N, d_array);
     cudaDeviceSynchronize();
 
-    // Step 2: Iteratively merge sorted blocks
+    // Step 2: Merge sorted blocks
     int subarray_size = blockSize;
     while (subarray_size < N) {
         int num_merge_blocks = (N + 2 * subarray_size - 1) / (2 * subarray_size);

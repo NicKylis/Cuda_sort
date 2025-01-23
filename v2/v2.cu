@@ -10,7 +10,6 @@ __global__ void bitonicSortLocalCUDA(int N, int *array) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     int thread_id = threadIdx.x;
 
-    // Load data into shared memory
     if (idx < N) {
         shared_array[thread_id] = array[idx];
     } else {

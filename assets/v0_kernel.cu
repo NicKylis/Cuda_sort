@@ -5,13 +5,13 @@
 #include <cuda_runtime.h>
 #include "array_gen.h"
 
-// CUDA kernel for sorting processes within a block
+// Kernel for sorting processes within a block
 __global__ void sortLocalCUDA(int rank, int num_q, int *array) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
     if (idx < num_q) {
         if (rank % 2 == 0) {
-            // Ascending sort (Even processes)
+            // Ascending sort
             for (int i = 0; i < num_q - 1; i++) {
                 for (int j = i + 1; j < num_q; j++) {
                     if (array[i] > array[j]) {
@@ -22,7 +22,7 @@ __global__ void sortLocalCUDA(int rank, int num_q, int *array) {
                 }
             }
         } else {
-            // Descending sort (Odd processes)
+            // Descending sort
             for (int i = 0; i < num_q - 1; i++) {
                 for (int j = i + 1; j < num_q; j++) {
                     if (array[i] < array[j]) {
@@ -36,8 +36,8 @@ __global__ void sortLocalCUDA(int rank, int num_q, int *array) {
     }
 }
 
-// CUDA kernel for minmax operation between threads
-__global__ void minmaxCUDA(int rank, int partner_rank, int num_q, int *array,
+// Kernel for trading operation between threads
+__global__ void mergeCUDA(int rank, int partner_rank, int num_q, int *array,
                             bool sort_descending) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -66,7 +66,7 @@ __global__ void minmaxCUDA(int rank, int partner_rank, int num_q, int *array,
 
 // Main bitonic sort kernel
 void bitonicSortCUDA(int rank, int num_p, int num_q, int *array) {
-    // Sorting the processes (threads in blocks)
+
     int *d_array;
     cudaMalloc((void **)&d_array, num_q * sizeof(int));
     cudaMemcpy(d_array, array, num_q * sizeof(int), cudaMemcpyHostToDevice);
@@ -84,7 +84,7 @@ void bitonicSortCUDA(int rank, int num_p, int num_q, int *array) {
             int partner_rank = rank ^ distance;
 
             // Perform minmax operation between partner threads
-            minmaxCUDA<<<numBlocks, blockSize>>>(rank, partner_rank, num_q, d_array, sort_descending);
+            mergeCUDA<<<numBlocks, blockSize>>>(rank, partner_rank, num_q, d_array, sort_descending);
             cudaDeviceSynchronize();
         }
     }

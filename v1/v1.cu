@@ -10,7 +10,6 @@ __global__ void bitonicSortLocalCUDA(int N, int *array) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     int thread_id = threadIdx.x;
 
-    // Load data into shared memory
     if (idx < N) {
         shared_array[thread_id] = array[idx];
     } else {
@@ -64,7 +63,6 @@ __global__ void mergeGlobalCUDA(int *array, int N, int subarray_size) {
     int right = mid;
     int out_idx = 0;
 
-    // Merge two sorted subarrays into `temp`
     while (left < mid && right < end) {
         if (array[left] <= array[right]) {
             temp[out_idx++] = array[left++];
@@ -73,7 +71,6 @@ __global__ void mergeGlobalCUDA(int *array, int N, int subarray_size) {
         }
     }
 
-    // Copy remaining elements
     while (left < mid) {
         temp[out_idx++] = array[left++];
     }
@@ -86,7 +83,7 @@ __global__ void mergeGlobalCUDA(int *array, int N, int subarray_size) {
         array[start + i] = temp[i];
     }
 
-    delete[] temp; // Free temporary buffer
+    delete[] temp;
 }
 
 void v1_sort(int N, int *array) {
@@ -106,7 +103,7 @@ void v1_sort(int N, int *array) {
     bitonicSortLocalCUDA<<<numBlocks, blockSize, blockSize * sizeof(int)>>>(N, d_array);
     cudaDeviceSynchronize();
 
-    // Step 2: Iteratively merge sorted blocks
+    // Step 2: Merge sorted blocks
     int subarray_size = blockSize;
     while (subarray_size < N) {
         int num_merge_blocks = (N + 2 * subarray_size - 1) / (2 * subarray_size);
