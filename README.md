@@ -34,6 +34,13 @@ This repository contains an implementation of the Bitonic sorting algorithm usin
 2. The program will sort a predefined array using the Bitonic sorting algorithm on the GPU.
    If you wish to see the output array on your screen, uncomment lines 33-37 in main.cu file.
 
+### Performance
+The algorithm has an almost linear performance with respect to the size of the array, for array sizes N < 2^30
+as shown in the performance graph below:
+
+![Performance Graph](https://github.com/NicKylis/Cuda_sort/blob/main/documentation/src/graph2.png)
+The comparison is among MPI and CUDA parallel sorting algorithms. You can find the MPI project [HERE](https://github.com/NicKylis/MpiSort).
+
 ### Customizing the Input
 - To sort a custom array, you can modify the input array in the `main.cu` file.
 
