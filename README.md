@@ -39,6 +39,7 @@ The algorithm has an almost linear performance with respect to the size of the a
 as shown in the performance graph below:
 
 ![Performance Graph](https://github.com/NicKylis/Cuda_sort/blob/main/documentation/src/graph2.png)
+
 The comparison is among MPI and CUDA parallel sorting algorithms. You can find the MPI project [HERE](https://github.com/NicKylis/MpiSort).
 
 ### Customizing the Input
